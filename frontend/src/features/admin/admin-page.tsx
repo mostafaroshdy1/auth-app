@@ -66,8 +66,16 @@ export function AdminPage() {
               )
               return (
                 <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.name}</TableCell>
-                  <TableCell>{user.email}</TableCell>
+                  <TableCell className="max-w-0 font-medium">
+                    <span className="block truncate" title={user.name}>
+                      {user.name}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-0">
+                    <span className="block truncate" title={user.email}>
+                      {user.email}
+                    </span>
+                  </TableCell>
                   <TableCell className="hidden md:table-cell">
                     {formatDate(user.createdAt)}
                   </TableCell>
