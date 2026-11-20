@@ -44,7 +44,7 @@ export class SessionsService {
       expiresAt,
       retainUntil: daysFromNow(this.config.get('SESSION_RETENTION_DAYS')),
     });
-    await this.cache.set(session, ttlSeconds);
+    await this.cache.setActive(session, ttlSeconds);
     return {
       session,
       refresh: { sessionId: session.id, userId, generation: 0, expiresAt },
@@ -100,8 +100,9 @@ export class SessionsService {
       userId: user.id,
       permissions: user.permissions,
     };
-    await this.cache.set(active, remaining);
-    return active;
+    // A concurrent revocation wins over this repopulation; fail closed.
+    const stored = await this.cache.setActive(active, remaining);
+    return stored ? active : null;
   }
 
   async listForUser(userId: string, currentId: string): Promise<SessionView[]> {

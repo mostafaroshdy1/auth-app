@@ -4,8 +4,11 @@ import { Test } from '@nestjs/testing';
 import type { Connection } from 'mongoose';
 import request from 'supertest';
 import type { Redis } from 'ioredis';
+import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module.js';
+import { secondsFromNow } from '../src/common/utils/time.js';
 import { REDIS } from '../src/infrastructure/redis/redis.module.js';
+import { SessionCacheService } from '../src/sessions/services/session-cache.service.js';
 import { setupApp } from '../src/setup.js';
 import { clearTestKeys, dropTestDatabase } from './support/isolation.js';
 
@@ -165,6 +168,35 @@ describe('Auth (e2e)', () => {
     );
     await other.get('/api/auth/me').expect(401);
     await agent.get('/api/auth/me').expect(200);
+  });
+
+  it('never lets a cache repopulation overwrite a revoked session', async () => {
+    const cache = app.get(SessionCacheService);
+    const redis = app.get<Redis>(REDIS);
+    const id = randomUUID();
+    const active = { id, userId: 'user-1', permissions: [] };
+
+    await expect(cache.setActive(active, 60)).resolves.toBe(true);
+    await expect(cache.get(id)).resolves.toEqual(active);
+
+    await cache.markRevoked([{ id, expiresAt: secondsFromNow(60) }]);
+    await expect(cache.get(id)).resolves.toBe('revoked');
+
+    await expect(cache.setActive(active, 60)).resolves.toBe(false);
+    await expect(cache.get(id)).resolves.toBe('revoked');
+
+    await cache.replaceExisting([active]);
+    await expect(cache.get(id)).resolves.toBe('revoked');
+    await expect(redis.ttl(`session:${id}`)).resolves.toBeGreaterThan(0);
+  });
+
+  it('does not create a cache entry when refreshing permissions', async () => {
+    const cache = app.get(SessionCacheService);
+    const id = randomUUID();
+
+    await cache.replaceExisting([{ id, userId: 'user-1', permissions: [] }]);
+
+    await expect(cache.get(id)).resolves.toBeNull();
   });
 
   it('guards admin routes by permission and applies changes to live sessions', async () => {

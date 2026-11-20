@@ -3,6 +3,10 @@ import { Redis } from 'ioredis';
 import { secondsUntil } from '../../common/utils/time.js';
 import { REDIS } from '../../infrastructure/redis/redis.module.js';
 import {
+  REPLACE_ACTIVE_IF_NOT_REVOKED_SCRIPT,
+  SET_ACTIVE_IF_NOT_REVOKED_SCRIPT,
+} from '../../infrastructure/redis/scripts/session-cache.script.js';
+import {
   REVOKED_SESSION_MARKER,
   SESSION_CACHE_PREFIX,
 } from '../constants/session-cache.constants.js';
@@ -27,24 +31,31 @@ export class SessionCacheService {
     return parsed.success && parsed.data.id === id ? parsed.data : null;
   }
 
-  async set(session: ActiveSession, ttlSeconds: number): Promise<void> {
-    await this.redis.set(
+  async setActive(
+    session: ActiveSession,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const result = await this.redis.eval(
+      SET_ACTIVE_IF_NOT_REVOKED_SCRIPT,
+      1,
       this.key(session.id),
       JSON.stringify(session),
-      'EX',
       ttlSeconds,
+      REVOKED_SESSION_MARKER,
     );
+    return Number(result) === 1;
   }
 
   async replaceExisting(sessions: ActiveSession[]): Promise<void> {
     if (sessions.length === 0) return;
     const pipeline = this.redis.pipeline();
     for (const session of sessions) {
-      pipeline.set(
+      pipeline.eval(
+        REPLACE_ACTIVE_IF_NOT_REVOKED_SCRIPT,
+        1,
         this.key(session.id),
         JSON.stringify(session),
-        'KEEPTTL',
-        'XX',
+        REVOKED_SESSION_MARKER,
       );
     }
     await pipeline.exec();
